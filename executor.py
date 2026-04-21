@@ -249,8 +249,18 @@ def execute(orders: list[Sized]) -> list[dict]:
                            "ts": datetime.now(timezone.utc).isoformat()}
 
         results.append(res)
-        if res.get("status") in ("simulated", "submitted", "error"):
-            # Ping Telegram on every fill and every error (silent on dry-run).
+        # Notify on successful fills and on real errors — but suppress the
+        # expected "not enough balance" / rate-limit chatter that would otherwise
+        # flood Telegram while the bot keeps retrying the same underfunded trades.
+        should_notify = False
+        if res.get("status") in ("simulated", "submitted"):
+            should_notify = True
+        elif res.get("status") == "error":
+            err = str(res.get("error", "")).lower()
+            noisy = ("not enough balance" in err or "allowance" in err
+                     or "rate limit" in err or "too many requests" in err)
+            should_notify = not noisy
+        if should_notify:
             notify(fmt_order(res), silent=(res.get("mode") == "DRY_RUN"))
         if res.get("status") in ("simulated", "submitted"):
             state["positions"][key] = {

@@ -28,6 +28,7 @@ from scanner import scan
 from sizing import size_portfolio
 from executor import execute, cancel_stale_orders
 from notify import notify
+from bankroll import effective_bankroll
 
 
 # ── Graceful shutdown ────────────────────────────────────────────────────
@@ -84,10 +85,18 @@ def run_once() -> None:
     if not candidates:
         return
 
-    sized = size_portfolio(candidates)
+    # Live bankroll: read the proxy wallet's USDC.e balance on-chain so we
+    # automatically deploy freed capital after redemptions. Falls back to
+    # static .env BANKROLL_USD if RPC is unreachable.
+    if not CFG.DRY_RUN and CFG.FUNDER_ADDRESS:
+        live_bankroll = effective_bankroll(CFG.FUNDER_ADDRESS, fallback=CFG.BANKROLL_USD)
+    else:
+        live_bankroll = CFG.BANKROLL_USD
+
+    sized = size_portfolio(candidates, bankroll=live_bankroll)
     logging.info(
-        "Sizing → %d orders, total $%.2f of $%s bankroll",
-        len(sized), sum(s.usd for s in sized), f"{CFG.BANKROLL_USD:,.0f}",
+        "Sizing → %d orders, total $%.2f of $%.2f bankroll",
+        len(sized), sum(s.usd for s in sized), live_bankroll,
     )
     if not sized:
         return

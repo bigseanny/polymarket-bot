@@ -9,7 +9,7 @@ services:
     name: polymarket-bot
     runtime: python
     plan: starter          # $7/mo always-on background worker
-    region: oregon         # region no longer matters; CLOB traffic proxied via CLOB_PROXY_URL
+    region: frankfurt      # non-US; use CLOB_PROXY_URL to bypass Polymarket's EU geoblock
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     autoDeploy: true

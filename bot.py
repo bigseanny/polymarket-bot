@@ -27,6 +27,7 @@ from config import CFG
 from scanner import scan
 from sizing import size_portfolio
 from executor import execute, cancel_stale_orders
+from notify import notify
 
 
 # ── Graceful shutdown ────────────────────────────────────────────────────
@@ -108,6 +109,13 @@ def run_once() -> None:
 
 def main_loop():
     _print_header()
+    mode = "DRY-RUN" if CFG.DRY_RUN else "LIVE"
+    notify(
+        f"\U0001F680 <b>Polymarket bot started</b> ({mode})\n"
+        f"Bankroll: <b>${CFG.BANKROLL_USD:,.0f}</b> \u00b7 Kelly {CFG.KELLY_FRACTION} "
+        f"\u00b7 MaxAsk {CFG.MAX_ASK} \u00b7 MinEdge {CFG.MIN_EDGE}",
+        silent=True,
+    )
     last_cleanup = 0.0
     failures = 0
 
@@ -126,9 +134,11 @@ def main_loop():
             failures = 0
         except KeyboardInterrupt:
             return
-        except Exception:
+        except Exception as exc:
             failures += 1
             logging.exception("Scan loop error (%d consecutive)", failures)
+            if failures in (1, 3, 5):  # ping on first error + if it persists
+                notify(f"\u26A0\uFE0F <b>Scan error (#{failures})</b>\n<code>{str(exc)[:300]}</code>")
             # Exponential backoff on repeated failures (max 10 min).
             backoff = min(600, CFG.POLL_SECONDS * (2 ** min(failures, 4)))
             logging.info("Backing off %ds", backoff)
@@ -141,6 +151,7 @@ def main_loop():
         _sleep_interruptible(remaining)
 
     logging.info("Bot exited cleanly.")
+    notify("\U0001F6D1 <b>Polymarket bot stopped</b> (clean shutdown)", silent=True)
 
 
 def _sleep_interruptible(seconds: int) -> None:

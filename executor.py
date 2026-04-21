@@ -22,6 +22,7 @@ from typing import Any
 
 from config import CFG
 from sizing import Sized
+from notify import notify, fmt_order
 
 log = logging.getLogger(__name__)
 
@@ -203,6 +204,9 @@ def execute(orders: list[Sized]) -> list[dict]:
                            "ts": datetime.now(timezone.utc).isoformat()}
 
         results.append(res)
+        if res.get("status") in ("simulated", "submitted", "error"):
+            # Ping Telegram on every fill and every error (silent on dry-run).
+            notify(fmt_order(res), silent=(res.get("mode") == "DRY_RUN"))
         if res.get("status") in ("simulated", "submitted"):
             state["positions"][key] = {
                 "market": c.market_slug, "outcome": c.outcome,

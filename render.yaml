@@ -1,0 +1,73 @@
+# Render Blueprint: Polymarket near-certainty bot as a Background Worker.
+# One-click deploy via https://render.com/deploy after pushing this repo to GitHub.
+#
+# After deploy, set the SECRET env vars in the Render dashboard
+# (Settings → Environment). Do NOT commit real secrets to this file.
+
+services:
+  - type: worker
+    name: polymarket-bot
+    runtime: python
+    plan: starter          # $7/mo always-on background worker
+    region: oregon         # any region works; pick one close to you
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    autoDeploy: true
+    envVars:
+      # ─── SECRETS — set these in the Render dashboard, not here ──────────
+      - key: POLYMARKET_PRIVATE_KEY
+        sync: false
+      - key: POLYMARKET_FUNDER_ADDRESS
+        sync: false
+
+      # ─── Safety defaults ────────────────────────────────────────────────
+      # Deploy FIRST with DRY_RUN=true, watch the logs for a scan or two,
+      # then flip to false in the Render dashboard to go live.
+      - key: DRY_RUN
+        value: "true"
+      - key: REQUIRE_CONFIRM
+        value: "false"       # no stdin on a hosted worker
+      - key: POLYMARKET_SIGNATURE_TYPE
+        value: "1"           # 1 = email/Magic-link wallet (most users)
+
+      # ─── Strategy ───────────────────────────────────────────────────────
+      - key: MAX_ASK
+        value: "0.95"
+      - key: MIN_BID
+        value: "0.90"
+      - key: MAX_SPREAD
+        value: "0.05"
+      - key: HAIRCUT
+        value: "0.01"
+      - key: MIN_EDGE
+        value: "0.04"
+      - key: MIN_VOLUME_USD
+        value: "50000"
+      - key: MIN_LIQUIDITY_USD
+        value: "5000"
+      - key: MAX_DAYS_TO_RESOLUTION
+        value: "60"
+      - key: MIN_DAYS_TO_RESOLUTION
+        value: "0.5"
+
+      # ─── Sizing ─────────────────────────────────────────────────────────
+      - key: BANKROLL_USD
+        value: "1000"
+      - key: KELLY_FRACTION
+        value: "0.25"
+      - key: MAX_POSITIONS
+        value: "20"
+      - key: MAX_PER_MARKET_USD
+        value: "200"
+      - key: MAX_PCT_OF_BOOK
+        value: "0.20"
+      - key: MIN_ORDER_USD
+        value: "5"
+
+      # ─── Runtime ────────────────────────────────────────────────────────
+      - key: POLL_SECONDS
+        value: "60"
+      - key: CANCEL_UNFILLED_AFTER_SECONDS
+        value: "300"          # cancel resting orders older than 5 min
+      - key: PYTHONUNBUFFERED
+        value: "1"            # stream logs to Render console in real time

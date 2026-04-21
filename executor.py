@@ -46,6 +46,39 @@ def _save_state(state: dict[str, Any]) -> None:
 
 # ── Lazy CLOB client init (only when going live) ────────────────────────
 _client = None
+_proxy_installed = False
+
+
+def _install_clob_proxy() -> None:
+    """If CLOB_PROXY_URL is set, replace py-clob-client's module-level httpx
+    client with one that routes through the proxy. py-clob-client uses a
+    single shared httpx.Client (see py_clob_client.http_helpers.helpers), so
+    swapping it here transparently proxies every CLOB API call including the
+    POST /order call that Polymarket geoblocks.
+
+    This also sets the `requests` library's env-based proxy for CLOB hosts
+    only (via NO_PROXY) so /book fetches in scanner.py go direct for speed.
+    """
+    global _proxy_installed
+    if _proxy_installed or not CFG.CLOB_PROXY_URL:
+        return
+    try:
+        import httpx
+        import py_clob_client.http_helpers.helpers as _pchelpers
+        _pchelpers._http_client = httpx.Client(
+            http2=True,
+            proxy=CFG.CLOB_PROXY_URL,
+            timeout=30.0,
+        )
+        # Redact credentials before logging.
+        safe = CFG.CLOB_PROXY_URL
+        if "@" in safe:
+            safe = safe.split("@", 1)[1]
+        log.info("CLOB requests now routed via proxy %s", safe)
+        _proxy_installed = True
+    except Exception as e:
+        log.error("Failed to install CLOB proxy: %s", e)
+        raise
 
 
 def _get_client():
@@ -57,6 +90,10 @@ def _get_client():
             "POLYMARKET_PRIVATE_KEY is not set. "
             "Add it to .env or set DRY_RUN=true to simulate."
         )
+
+    # Install proxy BEFORE importing/constructing ClobClient so the very
+    # first auth call (create_or_derive_api_creds) also uses it.
+    _install_clob_proxy()
 
     from py_clob_client.client import ClobClient
 

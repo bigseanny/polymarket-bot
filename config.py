@@ -79,6 +79,11 @@ class Config:
     # can still get burned by late scratches, injuries, weather, or lineup
     # changes; once the game is live the price reflects actual game state.
     SPORTS_REQUIRE_GAME_STARTED: bool = _b("SPORTS_REQUIRE_GAME_STARTED", True)
+    # Optional outbound proxy for all CLOB requests. Use this when the host's
+    # IP is geoblocked by Polymarket (e.g. Render worker in US/EU regions).
+    # Format: "http://user:pass@host:port" or "http://host:port". Leave blank
+    # to go direct. Only CLOB traffic routes through it; Gamma stays direct.
+    CLOB_PROXY_URL: str = os.getenv("CLOB_PROXY_URL", "")
     CANCEL_UNFILLED_AFTER_SECONDS: int = _i("CANCEL_UNFILLED_AFTER_SECONDS", 300)
     LOG_DIR: str = os.getenv("LOG_DIR", "logs")
     STATE_FILE: str = os.getenv("STATE_FILE", "logs/state.json")

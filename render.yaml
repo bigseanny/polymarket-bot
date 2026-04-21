@@ -78,6 +78,11 @@ services:
       # Example: "who-will-meet-with-iran-by-april-30"
       - key: WATCHLIST_SLUGS
         value: ""
+      # Only bet sports markets after tip-off. Pre-game favorites can get
+      # torched by late scratches, weather, lineup changes. Set to "false"
+      # if you want pre-game bets too.
+      - key: SPORTS_REQUIRE_GAME_STARTED
+        value: "true"
       - key: CANCEL_UNFILLED_AFTER_SECONDS
         value: "300"          # cancel resting orders older than 5 min
       - key: PYTHONUNBUFFERED

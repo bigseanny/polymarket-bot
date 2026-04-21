@@ -74,6 +74,11 @@ class Config:
     # from bulk listings (restricted/geofenced multi-market events).
     # Example: "who-will-meet-with-iran-by-april-30,who-will-trump-talk-to-in-april"
     WATCHLIST_SLUGS: str = os.getenv("WATCHLIST_SLUGS", "")
+    # For sports markets (NBA/NFL/NHL/MLB/soccer/etc.), require the game to
+    # have already tipped off before we'll place a bet. Pre-game favorites
+    # can still get burned by late scratches, injuries, weather, or lineup
+    # changes; once the game is live the price reflects actual game state.
+    SPORTS_REQUIRE_GAME_STARTED: bool = _b("SPORTS_REQUIRE_GAME_STARTED", True)
     CANCEL_UNFILLED_AFTER_SECONDS: int = _i("CANCEL_UNFILLED_AFTER_SECONDS", 300)
     LOG_DIR: str = os.getenv("LOG_DIR", "logs")
     STATE_FILE: str = os.getenv("STATE_FILE", "logs/state.json")

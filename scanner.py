@@ -200,6 +200,62 @@ def _days_until(iso_str: str | None) -> float | None:
     return (dt - datetime.now(timezone.utc)).total_seconds() / 86_400
 
 
+_SPORTS_TAG_HINTS = (
+    "sports", "nba", "nfl", "nhl", "mlb", "ncaa", "soccer", "football",
+    "basketball", "baseball", "hockey", "tennis", "ufc", "mma", "boxing",
+    "golf", "cricket", "formula", "f1", "esports", "games",
+)
+
+
+def _is_sports_market(market: dict) -> bool:
+    """Detect a sports/game market. Polymarket tags sports events and also
+    populates `gameStartTime` / `clearBookOnStart` on per-game markets, so we
+    use any of those signals as evidence."""
+    if market.get("gameStartTime") or market.get("clearBookOnStart"):
+        return True
+    # Tags can live on the market or the parent event; check both.
+    tag_sources = []
+    tag_sources.extend(market.get("tags") or [])
+    for ev in market.get("events") or []:
+        tag_sources.extend(ev.get("tags") or [])
+    for t in tag_sources:
+        label = (t.get("slug") or t.get("label") or "") if isinstance(t, dict) else str(t)
+        label = label.lower()
+        if any(hint in label for hint in _SPORTS_TAG_HINTS):
+            return True
+    return False
+
+
+def _parse_dt(iso_str: str | None) -> datetime | None:
+    if not iso_str:
+        return None
+    # Polymarket returns gameStartTime as "2025-11-24 05:00:00+00" (space, no Z)
+    # and endDate as "2025-11-24T05:00:00Z". Handle both.
+    s = str(iso_str).strip().replace(" ", "T").replace("Z", "+00:00")
+    # "+00" → "+00:00" for fromisoformat
+    if s.endswith("+00"):
+        s += ":00"
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
+def _sports_game_started(market: dict) -> bool:
+    """True iff we have a game-start timestamp and it's in the past."""
+    start = _parse_dt(market.get("gameStartTime"))
+    if start is None:
+        # Fall back to the market's startDate only if clearBookOnStart is set
+        # (indicates per-game market) — otherwise startDate is just listing
+        # time and not meaningful for this check.
+        if market.get("clearBookOnStart"):
+            start = _parse_dt(market.get("startDate"))
+    if start is None:
+        # No reliable start timestamp. Be conservative: treat as NOT started.
+        return False
+    return start <= datetime.now(timezone.utc)
+
+
 def _gamma_prefilter(market: dict) -> bool:
     """Cheap pre-filter using fields already on the Gamma market payload."""
     if market.get("closed") or not market.get("active"):
@@ -218,6 +274,11 @@ def _gamma_prefilter(market: dict) -> bool:
         return False
     if not (CFG.MIN_DAYS_TO_RESOLUTION <= days <= CFG.MAX_DAYS_TO_RESOLUTION):
         return False
+    # Sports markets: only bet once the game is live. Pre-game favorites can
+    # get torched by late scratches, weather, and lineup changes.
+    if CFG.SPORTS_REQUIRE_GAME_STARTED and _is_sports_market(market):
+        if not _sports_game_started(market):
+            return False
     return True
 
 

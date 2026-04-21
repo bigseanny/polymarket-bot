@@ -76,10 +76,9 @@ def run_once() -> None:
     logging.info("Top qualifying candidates: %d", len(candidates))
     for c in candidates[:10]:
         logging.info(
-            "  edge=%+.3f  %3s bid=%.3f ask=%.3f  vol=$%11s  liq=$%9s  %5.1fd  %s",
-            c.edge, c.outcome, c.best_bid, c.best_ask,
-            f"{c.volume_usd:,.0f}", f"{c.liquidity_usd:,.0f}",
-            c.days_to_resolution, c.market_slug[:50],
+            "  apr=%+.0f%%  edge=%+.3f  %3s bid=%.3f ask=%.3f  %5.1fd  vol=$%11s  %s",
+            c.annualized_return * 100, c.edge, c.outcome, c.best_bid, c.best_ask,
+            c.days_to_resolution, f"{c.volume_usd:,.0f}", c.market_slug[:50],
         )
 
     if not candidates:

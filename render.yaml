@@ -50,9 +50,11 @@ services:
       - key: MIN_LIQUIDITY_USD
         value: "5000"
       - key: MAX_DAYS_TO_RESOLUTION
-        value: "60"
+        value: "14"
       - key: MIN_DAYS_TO_RESOLUTION
         value: "0.5"
+      - key: TARGET_APR
+        value: "1.0"          # 100% annualized target; scales edge floor with days
 
       # ─── Sizing ─────────────────────────────────────────────────────────
       - key: BANKROLL_USD
@@ -71,6 +73,11 @@ services:
       # ─── Runtime ────────────────────────────────────────────────────────
       - key: POLL_SECONDS
         value: "60"
+      # Comma-separated event/market slugs for markets Polymarket hides
+      # from the bulk listing (restricted/geofenced multi-market events).
+      # Example: "who-will-meet-with-iran-by-april-30"
+      - key: WATCHLIST_SLUGS
+        value: ""
       - key: CANCEL_UNFILLED_AFTER_SECONDS
         value: "300"          # cancel resting orders older than 5 min
       - key: PYTHONUNBUFFERED

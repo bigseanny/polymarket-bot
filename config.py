@@ -49,8 +49,13 @@ class Config:
     MIN_EDGE: float = _f("MIN_EDGE", 0.04)           # require (1-haircut-ask) ≥ this
     MIN_VOLUME_USD: float = _f("MIN_VOLUME_USD", 50_000)
     MIN_LIQUIDITY_USD: float = _f("MIN_LIQUIDITY_USD", 5_000)
-    MAX_DAYS_TO_RESOLUTION: float = _f("MAX_DAYS_TO_RESOLUTION", 60)
+    MAX_DAYS_TO_RESOLUTION: float = _f("MAX_DAYS_TO_RESOLUTION", 14)
     MIN_DAYS_TO_RESOLUTION: float = _f("MIN_DAYS_TO_RESOLUTION", 0.5)
+
+    # Edge must clear max(MIN_EDGE, TARGET_APR * ask * days/365).
+    # Longer bets need a larger edge to earn the same annualized return.
+    # Set TARGET_APR = 0 to disable scaling and use flat MIN_EDGE only.
+    TARGET_APR: float = _f("TARGET_APR", 1.0)        # 1.0 = ~100% annualized target
 
     # ── Sizing (fractional Kelly) ────────────────────────────────────────
     BANKROLL_USD: float = _f("BANKROLL_USD", 1_000)         # total capital to deploy
@@ -64,6 +69,11 @@ class Config:
     DRY_RUN: bool = _b("DRY_RUN", True)              # default safe; flip to False for live
     REQUIRE_CONFIRM: bool = _b("REQUIRE_CONFIRM", True)  # interactive y/n before each order
     POLL_SECONDS: int = _i("POLL_SECONDS", 60)       # scan interval
+    # Comma-separated event or market slugs to ALWAYS inspect each scan,
+    # in addition to the paginated feed. Use for markets Polymarket hides
+    # from bulk listings (restricted/geofenced multi-market events).
+    # Example: "who-will-meet-with-iran-by-april-30,who-will-trump-talk-to-in-april"
+    WATCHLIST_SLUGS: str = os.getenv("WATCHLIST_SLUGS", "")
     CANCEL_UNFILLED_AFTER_SECONDS: int = _i("CANCEL_UNFILLED_AFTER_SECONDS", 300)
     LOG_DIR: str = os.getenv("LOG_DIR", "logs")
     STATE_FILE: str = os.getenv("STATE_FILE", "logs/state.json")

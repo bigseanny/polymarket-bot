@@ -43,6 +43,7 @@ class Candidate:
     best_ask_size: float   # shares available at best ask (in #shares, not USD)
     spread: float          # best_ask - best_bid
     edge: float            # (1 - haircut) - best_ask
+    annualized_return: float  # gross annualized % if we win
     volume_usd: float
     liquidity_usd: float
     end_date: str
@@ -56,20 +57,30 @@ class Candidate:
         return d
 
 
-def fetch_active_markets(limit: int = 500) -> list[dict]:
-    """Page through Gamma API events to gather all active, non-closed markets."""
+def fetch_active_markets(max_events: int = 5000) -> list[dict]:
+    """Page through Gamma API events to gather all active, non-closed markets.
+
+    We query the `/events` endpoint sorted by endDate ascending so we always
+    get the soonest-resolving events first — the ones that matter for a
+    short-timeframe strategy. We also deduplicate by market id because Gamma
+    sometimes returns the same market under multiple events.
+    """
     out: list[dict] = []
+    seen_ids: set[str] = set()
     offset = 0
     page_size = 100
-    while offset < limit:
+    max_days = CFG.MAX_DAYS_TO_RESOLUTION
+
+    while offset < max_events:
         url = f"{CFG.GAMMA_API}/events"
         params = {
             "active": "true",
             "closed": "false",
+            "archived": "false",
             "limit": page_size,
             "offset": offset,
-            "order": "volume_24hr",
-            "ascending": "false",
+            "order": "endDate",
+            "ascending": "true",
         }
         try:
             r = requests.get(url, params=params, timeout=15)
@@ -80,15 +91,84 @@ def fetch_active_markets(limit: int = 500) -> list[dict]:
             break
         if not events:
             break
+
+        # Early exit: once event endDates pass our MAX_DAYS window we can stop.
+        # Use the minimum endDate of this page to decide; safe for short strats.
+        stop_after_page = False
         for ev in events:
+            ev_days = _days_until(ev.get("endDate"))
             for m in ev.get("markets", []) or []:
+                mid = str(m.get("id") or m.get("conditionId") or m.get("slug"))
+                if mid in seen_ids:
+                    continue
+                seen_ids.add(mid)
                 m["_event_slug"] = ev.get("slug")
                 out.append(m)
-        if len(events) < page_size:
+
+            # Only stop paging when event endDates clearly exceed our window.
+            # Guarantee we page at least far enough to cover the window —
+            # Polymarket has 1000+ events resolving within a 14-day horizon.
+            if ev_days is not None and ev_days > max_days + 7:
+                stop_after_page = True
+
+        if len(events) < page_size or stop_after_page:
             break
         offset += page_size
-    log.info("Pulled %d markets from Gamma", len(out))
+
+    # Merge in watchlist slugs — markets/events Polymarket hides from bulk
+    # listings but we can fetch directly.
+    _merge_watchlist(out, seen_ids)
+
+    log.info("Pulled %d unique markets from Gamma (incl. %d watchlist)",
+             len(out), _watchlist_count(seen_ids))
     return out
+
+
+_WL_ADDED: int = 0
+
+
+def _watchlist_count(_seen) -> int:
+    return _WL_ADDED
+
+
+def _merge_watchlist(out: list[dict], seen_ids: set[str]) -> None:
+    """Fetch each watchlist slug directly (as event OR market) and append any
+    missing markets into `out`."""
+    global _WL_ADDED
+    _WL_ADDED = 0
+    raw = (CFG.WATCHLIST_SLUGS or "").strip()
+    if not raw:
+        return
+    slugs = [s.strip() for s in raw.split(",") if s.strip()]
+    for slug in slugs:
+        # Try event first (multi-market), then market (single).
+        try:
+            r = requests.get(f"{CFG.GAMMA_API}/events", params={"slug": slug}, timeout=10)
+            r.raise_for_status()
+            events = r.json() or []
+            if events:
+                for m in events[0].get("markets", []) or []:
+                    mid = str(m.get("id") or m.get("conditionId") or m.get("slug"))
+                    if mid and mid not in seen_ids:
+                        m["_event_slug"] = events[0].get("slug")
+                        out.append(m)
+                        seen_ids.add(mid)
+                        _WL_ADDED += 1
+                continue
+        except Exception as e:
+            log.debug("watchlist event fetch failed for %s: %s", slug, e)
+        try:
+            r = requests.get(f"{CFG.GAMMA_API}/markets", params={"slug": slug}, timeout=10)
+            r.raise_for_status()
+            markets = r.json() or []
+            for m in markets:
+                mid = str(m.get("id") or m.get("conditionId") or m.get("slug"))
+                if mid and mid not in seen_ids:
+                    out.append(m)
+                    seen_ids.add(mid)
+                    _WL_ADDED += 1
+        except Exception as e:
+            log.debug("watchlist market fetch failed for %s: %s", slug, e)
 
 
 def _parse_tokens(market: dict) -> list[tuple[str, str]]:
@@ -224,8 +304,21 @@ def scan() -> list[Candidate]:
                 continue
 
             edge = (1.0 - CFG.HAIRCUT) - ask_price
-            if edge < CFG.MIN_EDGE:
+
+            # Time-scaled edge floor: longer-dated bets must earn more to
+            # match the same annualized return as short-dated ones.
+            required_edge = CFG.MIN_EDGE
+            if CFG.TARGET_APR > 0 and days > 0:
+                apr_required = ask_price * CFG.TARGET_APR * (days / 365.0)
+                required_edge = max(required_edge, apr_required)
+
+            if edge < required_edge:
                 continue
+
+            # Compute gross annualized return if the bet wins.
+            # Profit per $1 staked = (1-ask)/ask; extrapolate to 365 days.
+            gross_per_dollar = (1.0 - ask_price) / ask_price if ask_price > 0 else 0.0
+            annualized = gross_per_dollar * (365.0 / max(days, 0.01))
 
             candidates.append(Candidate(
                 market_slug=m.get("slug", ""),
@@ -238,6 +331,7 @@ def scan() -> list[Candidate]:
                 best_ask_size=ask_size,
                 spread=round(spread, 4),
                 edge=round(edge, 4),
+                annualized_return=round(annualized, 3),
                 volume_usd=vol,
                 liquidity_usd=liq,
                 end_date=end_date,
@@ -246,6 +340,8 @@ def scan() -> list[Candidate]:
                 tick_size=tick,
             ))
 
-    candidates.sort(key=lambda c: c.edge, reverse=True)
+    # Rank by annualized return rather than raw edge — a 4¢ edge resolving in
+    # 3 days beats a 4¢ edge resolving in 14 days.
+    candidates.sort(key=lambda c: c.annualized_return, reverse=True)
     log.info("Scan complete: %d qualifying candidates", len(candidates))
     return candidates

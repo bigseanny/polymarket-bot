@@ -168,6 +168,8 @@ def execute(orders: list[Sized]) -> list[dict]:
                 "market": c.market_slug, "outcome": c.outcome,
                 "token_id": c.token_id, "price": price,
                 "shares": shares, "usd": usd, "edge": c.edge,
+                "days_to_resolution": c.days_to_resolution,
+                "annualized_return": c.annualized_return,
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         else:
@@ -193,6 +195,8 @@ def execute(orders: list[Sized]) -> list[dict]:
                         "market": c.market_slug, "outcome": c.outcome,
                         "token_id": c.token_id, "price": price,
                         "shares": shares, "usd": usd, "edge": c.edge,
+                        "days_to_resolution": c.days_to_resolution,
+                        "annualized_return": c.annualized_return,
                         "response": resp,
                         "ts": datetime.now(timezone.utc).isoformat(),
                     }

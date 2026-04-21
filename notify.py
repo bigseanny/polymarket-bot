@@ -65,8 +65,18 @@ def fmt_order(result: dict) -> str:
             f"Error: <code>{str(result.get('error', ''))[:300]}</code>"
         )
 
+    # Include days-to-resolution + annualized return if present.
+    days = result.get("days_to_resolution")
+    apr = result.get("annualized_return")
+    extras = []
+    if days is not None:
+        extras.append(f"{days:.1f}d")
+    if apr is not None:
+        extras.append(f"{apr*100:.0f}% apr")
+    tail = (" · " + " · ".join(extras)) if extras else ""
+
     return (
         f"{emoji} <b>[{mode_tag}] {outcome} @ {price}</b>\n"
         f"Market: <code>{market}</code>\n"
-        f"Size: {shares} shares · <b>${usd}</b> · edge {edge:+.3f}"
+        f"Size: {shares} shares · <b>${usd}</b> · edge {edge:+.3f}{tail}"
     )

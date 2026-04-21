@@ -9,7 +9,7 @@ services:
     name: polymarket-bot
     runtime: python
     plan: starter          # $7/mo always-on background worker
-    region: frankfurt      # non-US region to avoid Polymarket CLOB geoblock
+    region: singapore      # non-US/EU region; Polymarket blocks US & EU datacenter IPs
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     autoDeploy: true

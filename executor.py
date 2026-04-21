@@ -215,7 +215,7 @@ def execute(orders: list[Sized]) -> list[dict]:
                        "market": c.market_slug, "ts": datetime.now(timezone.utc).isoformat()}
             else:
                 try:
-                    from py_clob_client.clob_types import OrderArgs, OrderType
+                    from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
                     from py_clob_client.order_builder.constants import BUY
 
                     client = _get_client()
@@ -225,7 +225,11 @@ def execute(orders: list[Sized]) -> list[dict]:
                         size=shares,
                         side=BUY,
                     )
-                    signed = client.create_order(order)
+                    # Neg-risk markets (multi-outcome events like "Will X win election")
+                    # require a distinct EIP-712 domain. Passing the wrong flag causes
+                    # the CLOB to reject the signature as invalid.
+                    opts = PartialCreateOrderOptions(neg_risk=bool(c.neg_risk))
+                    signed = client.create_order(order, opts)
                     resp = client.post_order(signed, OrderType.GTC)
                     res = {
                         "mode": "LIVE", "status": "submitted",

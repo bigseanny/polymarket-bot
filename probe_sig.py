@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from py_clob_client_v2.client import ClobClient
-from py_clob_client_v2.clob_types import OrderArgs, OrderType
+from py_clob_client_v2.clob_types import OrderArgs, OrderType, OrderPayload
 from py_clob_client_v2.order_builder.constants import BUY
 from py_clob_client_v2.constants import POLYGON
 
@@ -57,7 +57,8 @@ for sig in (1, 2):
         print(f"  RESULT: {resp}")
         # Cancel immediately if it landed
         if resp.get("success") and resp.get("orderID"):
-            c.cancel_order(order_id=resp["orderID"])
+            # V2: cancel_order takes an OrderPayload with `orderID` field.
+            c.cancel_order(OrderPayload(orderID=resp["orderID"]))
             print(f"  (cancelled)")
     except Exception as e:
         msg = str(e)

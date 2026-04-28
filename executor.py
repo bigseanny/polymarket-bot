@@ -171,7 +171,9 @@ def cancel_stale_orders() -> int:
     cancelled = 0
     for oid in to_cancel:
         try:
-            client.cancel_order(order_id=oid)
+            # V2: cancel_order takes OrderPayload(orderID=...).
+            from py_clob_client_v2.clob_types import OrderPayload
+            client.cancel_order(OrderPayload(orderID=oid))
             cancelled += 1
             log.info("Cancelled stale order %s", oid)
         except Exception as e:

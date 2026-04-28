@@ -64,7 +64,9 @@ def _install_clob_proxy() -> None:
         return
     try:
         import httpx
-        import py_clob_client.http_helpers.helpers as _pchelpers
+        # V2 SDK package is py_clob_client_v2 (V1 client stopped working at
+        # the April 28 2026 cutover).
+        import py_clob_client_v2.http_helpers.helpers as _pchelpers
         _pchelpers._http_client = httpx.Client(
             http2=True,
             proxy=CFG.CLOB_PROXY_URL,
@@ -95,7 +97,7 @@ def _get_client():
     # first auth call (create_or_derive_api_creds) also uses it.
     _install_clob_proxy()
 
-    from py_clob_client.client import ClobClient
+    from py_clob_client_v2.client import ClobClient
 
     kwargs = dict(host=CFG.CLOB_API, key=CFG.PRIVATE_KEY, chain_id=CFG.CHAIN_ID)
     if CFG.SIGNATURE_TYPE != 0:
@@ -108,7 +110,8 @@ def _get_client():
         kwargs["funder"] = CFG.FUNDER_ADDRESS
 
     client = ClobClient(**kwargs)
-    client.set_api_creds(client.create_or_derive_api_creds())
+    # V2 renamed create_or_derive_api_creds → create_or_derive_api_key.
+    client.set_api_creds(client.create_or_derive_api_key())
     log.info("CLOB client initialized (signature_type=%d)", CFG.SIGNATURE_TYPE)
     _client = client
     return client
@@ -145,7 +148,8 @@ def cancel_stale_orders() -> int:
         return 0
     try:
         client = _get_client()
-        open_orders = client.get_orders() or []
+        # V2 renamed get_orders → get_open_orders.
+        open_orders = client.get_open_orders() or []
     except Exception as e:
         log.warning("cancel_stale: could not list orders: %s", e)
         return 0
@@ -167,7 +171,7 @@ def cancel_stale_orders() -> int:
     cancelled = 0
     for oid in to_cancel:
         try:
-            client.cancel(order_id=oid)
+            client.cancel_order(order_id=oid)
             cancelled += 1
             log.info("Cancelled stale order %s", oid)
         except Exception as e:
@@ -215,8 +219,8 @@ def execute(orders: list[Sized]) -> list[dict]:
                        "market": c.market_slug, "ts": datetime.now(timezone.utc).isoformat()}
             else:
                 try:
-                    from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
-                    from py_clob_client.order_builder.constants import BUY
+                    from py_clob_client_v2.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
+                    from py_clob_client_v2.order_builder.constants import BUY
 
                     client = _get_client()
                     order = OrderArgs(

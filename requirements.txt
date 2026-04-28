@@ -1,3 +1,4 @@
 requests>=2.31
 python-dotenv>=1.0
-py-clob-client>=0.20
+# V2 client — V1 stopped working at the April 28 2026 cutover.
+py-clob-client-v2>=1.0

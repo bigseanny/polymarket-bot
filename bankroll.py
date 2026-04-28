@@ -22,8 +22,10 @@ import requests
 
 log = logging.getLogger(__name__)
 
-# USDC.e (bridged) on Polygon — this is what Polymarket uses.
-USDC_E_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+# Polymarket USD (pUSD) on Polygon — V2 collateral token (post-April-28-2026).
+# Backed 1:1 by USDC, 6 decimals, replaces the old USDC.e collateral.
+PUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+USDC_E_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"  # legacy; still readable
 
 # Public Polygon RPCs — we try them in order until one responds.
 # No API key required for light usage (a few calls per minute).
@@ -93,21 +95,31 @@ def get_usdc_balance(address: str) -> Optional[float]:
     padded = address.replace("0x", "").rjust(64, "0")
     call_data = _BALANCE_OF_SELECTOR + padded
 
-    for rpc in _RPCS:
-        result = _eth_call(rpc, USDC_E_ADDRESS, call_data)
-        if result and result.startswith("0x"):
-            try:
-                raw = int(result, 16)
-                # USDC.e has 6 decimals.
-                balance_usd = raw / 1_000_000
-                _cache.update(ts=now, value=balance_usd, addr=address)
-                log.debug("USDC.e balance of %s = $%.2f (via %s)",
-                          address, balance_usd, rpc)
-                return balance_usd
-            except ValueError:
-                continue
-    log.warning("All Polygon RPCs failed — could not read USDC.e balance")
-    return None
+    # V2: read pUSD (the new collateral). We also fall back to summing in any
+    # legacy USDC.e that may still be sitting in the proxy (shouldn't normally
+    # happen post-migration, but harmless to include).
+    total = 0.0
+    rpc_ok = False
+    for token_label, token_addr in (("pUSD", PUSD_ADDRESS), ("USDC.e", USDC_E_ADDRESS)):
+        for rpc in _RPCS:
+            result = _eth_call(rpc, token_addr, call_data)
+            if result and result.startswith("0x"):
+                try:
+                    raw = int(result, 16)
+                    bal = raw / 1_000_000  # both tokens have 6 decimals
+                    total += bal
+                    rpc_ok = True
+                    log.debug("%s balance of %s = $%.2f (via %s)",
+                              token_label, address, bal, rpc)
+                    break  # next token
+                except ValueError:
+                    continue
+        # If all RPCs failed for THIS token, log and continue to next token.
+    if not rpc_ok:
+        log.warning("All Polygon RPCs failed — could not read collateral balance")
+        return None
+    _cache.update(ts=now, value=total, addr=address)
+    return total
 
 
 def effective_bankroll(proxy_address: str, fallback: float,

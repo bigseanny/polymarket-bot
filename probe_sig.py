@@ -12,10 +12,10 @@ import os, sys, traceback
 from dotenv import load_dotenv
 load_dotenv()
 
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs, OrderType
-from py_clob_client.order_builder.constants import BUY
-from py_clob_client.constants import POLYGON
+from py_clob_client_v2.client import ClobClient
+from py_clob_client_v2.clob_types import OrderArgs, OrderType
+from py_clob_client_v2.order_builder.constants import BUY
+from py_clob_client_v2.constants import POLYGON
 
 PK = os.environ["POLYMARKET_PRIVATE_KEY"]
 FUNDER = os.environ["POLYMARKET_FUNDER_ADDRESS"]
@@ -45,7 +45,7 @@ for sig in (1, 2):
     try:
         c = ClobClient("https://clob.polymarket.com", key=PK, chain_id=POLYGON,
                        signature_type=sig, funder=FUNDER)
-        creds = c.create_or_derive_api_creds()
+        creds = c.create_or_derive_api_key()
         c.set_api_creds(creds)
         print(f"  api_key={creds.api_key[:12]}...")
 
@@ -57,7 +57,7 @@ for sig in (1, 2):
         print(f"  RESULT: {resp}")
         # Cancel immediately if it landed
         if resp.get("success") and resp.get("orderID"):
-            c.cancel(order_id=resp["orderID"])
+            c.cancel_order(order_id=resp["orderID"])
             print(f"  (cancelled)")
     except Exception as e:
         msg = str(e)

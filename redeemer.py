@@ -210,6 +210,28 @@ def redeem_all(dry_run: bool = False) -> int:
         log.info("%s - No positions to redeem", _ts())
         return 0
 
+    # Filter out neg-risk LOSERS — they revert on-chain because the
+    # NegRiskAdapter has no payout vector for losing outcomes. Standard
+    # market losers redeem fine (the CTF just burns and pays $0). Neg-risk
+    # winners (curPrice >= 0.999) still go through.
+    skipped_losers = []
+    keep = []
+    for p in positions:
+        is_neg = bool(p.get("negativeRisk"))
+        cur_price = float(p.get("curPrice") or 0)
+        # Loser = curPrice is 0 (lost) AND we're holding the losing side.
+        if is_neg and cur_price < 0.001:
+            skipped_losers.append(p)
+        else:
+            keep.append(p)
+    if skipped_losers:
+        log.info("%s - Skipping %d neg-risk losing positions (no payout, would revert)",
+                 _ts(), len(skipped_losers))
+    positions = keep
+    if not positions:
+        log.info("%s - No redeemable winners to process", _ts())
+        return 0
+
     total_value = sum(float(p.get("currentValue") or 0) for p in positions)
     log.info("%s - Found %d redeemable positions (notional ~$%.2f)",
              _ts(), len(positions), total_value)
@@ -248,7 +270,7 @@ def redeem_all(dry_run: bool = False) -> int:
 
             try:
                 resp = client.execute([txn], f"redeem {cid[:12]}")
-                resp.wait()
+                final = resp.wait()
             except Exception as relay_err:
                 status = getattr(relay_err, "status_code", None)
                 if status in (429, 1015):
@@ -256,9 +278,24 @@ def redeem_all(dry_run: bool = False) -> int:
                                 status, RELAYER_RETRY_WAIT)
                     time.sleep(RELAYER_RETRY_WAIT)
                     resp = client.execute([txn], f"redeem {cid[:12]}")
-                    resp.wait()
+                    final = resp.wait()
                 else:
                     raise
+
+            # Detect on-chain failure: relayer accepts the tx, mines it, but
+            # the contract call reverts. resp.wait() returns the final state
+            # but does not raise — we have to inspect the state ourselves.
+            state = None
+            tx_hash = None
+            for attr in ("state", "status", "transaction_state"):
+                state = state or getattr(final, attr, None) or getattr(resp, attr, None)
+            for attr in ("transaction_hash", "hash", "tx_hash"):
+                tx_hash = tx_hash or getattr(final, attr, None) or getattr(resp, attr, None)
+            state_str = str(state or "").upper()
+            if "FAIL" in state_str or (tx_hash in (None, "", "!")):
+                log.error("%s - On-chain FAIL: %s (state=%s tx=%s)",
+                          _ts(), title, state, tx_hash)
+                continue
 
             redeemed += 1
             redeemed_value += cur_val

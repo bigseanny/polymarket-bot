@@ -23,6 +23,7 @@ from typing import Any
 from config import CFG
 from sizing import Sized
 from notify import notify, fmt_order
+from journal import record_trade
 
 log = logging.getLogger(__name__)
 
@@ -268,6 +269,11 @@ def execute(orders: list[Sized]) -> list[dict]:
             should_notify = not noisy
         if should_notify:
             notify(fmt_order(res), silent=(res.get("mode") == "DRY_RUN"))
+        # Trade journal: log every real submitted fill for weekly digest.
+        try:
+            record_trade(res)
+        except Exception as je:
+            log.warning("journal record failed: %s", je)
         if res.get("status") in ("simulated", "submitted"):
             state["positions"][key] = {
                 "market": c.market_slug, "outcome": c.outcome,

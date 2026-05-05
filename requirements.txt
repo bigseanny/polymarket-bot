@@ -2,3 +2,9 @@ requests>=2.31
 python-dotenv>=1.0
 # V2 client — V1 stopped working at the April 28 2026 cutover.
 py-clob-client-v2>=1.0
+# Auto-redeem via Polymarket relayer (Stage 2). Optional — omit if you
+# only need order placement and not redemption.
+py-builder-relayer-client @ git+https://github.com/Polymarket/py-builder-relayer-client.git
+py-builder-signing-sdk @ git+https://github.com/Polymarket/py-builder-signing-sdk.git
+eth-abi>=4.0
+eth-utils>=2.0

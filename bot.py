@@ -29,6 +29,11 @@ from sizing import size_portfolio
 from executor import execute, cancel_stale_orders
 from notify import notify
 from bankroll import effective_bankroll
+from circuit_breaker import (
+    check_and_maybe_trip,
+    poll_telegram_commands,
+    is_paused,
+)
 
 
 # ── Graceful shutdown ────────────────────────────────────────────────────
@@ -73,6 +78,23 @@ def _print_header():
 
 
 def run_once() -> None:
+    # Telegram command poll (cheap; lets /resume, /pause, /status work).
+    try:
+        poll_telegram_commands()
+    except Exception as e:
+        logging.warning("tg poll failed: %s", e)
+
+    # Circuit breaker: check NAV drawdown vs nav_history snapshot.
+    if not CFG.DRY_RUN and CFG.FUNDER_ADDRESS:
+        try:
+            check_and_maybe_trip(CFG.FUNDER_ADDRESS)
+        except Exception as e:
+            logging.warning("circuit breaker check failed: %s", e)
+
+    if is_paused():
+        logging.info("Bot is PAUSED — skipping scan. Send /resume in Telegram.")
+        return
+
     candidates = scan()
     logging.info("Top qualifying candidates: %d", len(candidates))
     for c in candidates[:10]:

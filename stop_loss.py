@@ -132,12 +132,19 @@ def _fetch_open_positions(funder: str) -> list[dict]:
 
 
 def _fetch_price_history(token_id: str, hours: float = 6.0) -> list[dict]:
-    """Fetch price history points. Returns list of {t, p} dicts."""
+    """Fetch price history points over the last N hours.
+
+    Uses startTs/endTs (not the `interval` param, which only controls
+    granularity). fidelity=60 = one point per minute.
+    Returns list of {t, p} dicts (oldest first).
+    """
     try:
+        end_ts = int(time.time())
+        start_ts = end_ts - int(hours * 3600)
         r = requests.get(
             f"{CLOB_API}/prices-history",
-            params={"market": token_id, "interval": "1h" if hours <= 24 else "1d",
-                    "fidelity": 1},
+            params={"market": token_id, "startTs": start_ts,
+                    "endTs": end_ts, "fidelity": 60},
             timeout=15,
         )
         r.raise_for_status()
@@ -148,20 +155,29 @@ def _fetch_price_history(token_id: str, hours: float = 6.0) -> list[dict]:
 
 
 def _fetch_trades_volume(token_id: str, since_minutes: int) -> float:
-    """Sum USD volume on token in the last N minutes from data API."""
+    """Sum USD volume on token in the last N minutes.
+
+    Polymarket /trades doesn't accept a server-side timestamp filter; it returns
+    most-recent first. We pull up to 500 and filter client-side.
+    """
     try:
-        cutoff = (datetime.now(timezone.utc)
-                  - timedelta(minutes=since_minutes)).timestamp()
+        cutoff = int((datetime.now(timezone.utc)
+                      - timedelta(minutes=since_minutes)).timestamp())
         r = requests.get(
             f"{DATA_API}/trades",
-            params={"market": token_id, "limit": 500,
-                    "filterType": "TIMESTAMP", "filterAmount": int(cutoff)},
+            params={"market": token_id, "limit": 500},
             timeout=15,
         )
         r.raise_for_status()
         trades = r.json() or []
-        return sum(float(t.get("size", 0)) * float(t.get("price", 0))
-                   for t in trades)
+        total = 0.0
+        for t in trades:
+            ts = int(t.get("timestamp") or 0)
+            if ts < cutoff:
+                # Trades are returned newest-first, so we can stop early.
+                break
+            total += float(t.get("size", 0)) * float(t.get("price", 0))
+        return total
     except Exception as e:
         log.debug("trades fetch failed for %s: %s", token_id[:12], e)
         return 0.0

@@ -24,6 +24,7 @@ from config import CFG
 from sizing import Sized
 from notify import notify, fmt_order
 from journal import record_trade
+from stop_loss import is_token_in_cooldown
 
 log = logging.getLogger(__name__)
 
@@ -194,6 +195,11 @@ def execute(orders: list[Sized]) -> list[dict]:
         # Idempotency guard.
         if key in state["positions"]:
             log.info("Skipping %s — already have position this session", c.market_slug)
+            continue
+
+        # Stop-loss cooldown: don't re-enter a token we just stopped out of.
+        if is_token_in_cooldown(c.token_id):
+            log.info("Skipping %s — token in 24h stop-loss cooldown", c.market_slug)
             continue
 
         price = _round_to_tick(c.best_ask, c.tick_size)

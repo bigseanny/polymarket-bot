@@ -3,13 +3,19 @@
 For each open position we hold, exit IF AND ONLY IF all three triggers fire:
 
   1. Drawdown ≥ entry edge (price has fallen by at least the edge we paid for)
-  2. Recent move is ≥ STOP_VOL_SIGMA σ of last 60-min price history (statistically
+  2. Recent move is ≥ STOP_VOL_SIGMA σ of last 6h price history (statistically
      unusual — not noise)
-  3. Recent volume is ≥ STOP_VOLUME_MULT × the trailing 6-hour baseline (real
-     flow accompanies the move, suggesting news, not a thin-book wobble)
+  3. Velocity confirmation: price dropped ≥ STOP_VELOCITY_PCT in the last 60 min
+     (sustained drop over multiple data points, not a single tick wobble)
 
 When triggered, we MARKET-SELL the full position via py-clob-client and write
 an exit row to the journal with `exit_reason="stop_loss"` and the trigger metrics.
+
+Note: We deliberately do NOT use Polymarket's /trades endpoint as a volume
+signal. The endpoint silently ignores token filters and returns a global
+firehose, making per-token volume unreliable. Velocity (sustained price
+drop) is a better noise filter and uses only the per-token prices-history
+endpoint which is reliable.
 
 Sanity guards:
   * No-stop window: 5 min after entry (avoids flash stops on slippage)
@@ -40,8 +46,8 @@ EXITS_LOG = LOG_DIR / "stop_exits.jsonl"
 
 # ── Config ─────────────────────────────────────────────────────────────
 STOP_LOSS_ENABLED = os.getenv("STOP_LOSS_ENABLED", "true").lower() in ("1", "true", "yes")
-STOP_VOL_SIGMA = float(os.getenv("STOP_VOL_SIGMA", "2.0"))      # 2σ recent move
-STOP_VOLUME_MULT = float(os.getenv("STOP_VOLUME_MULT", "2.0"))  # 2× baseline volume
+STOP_VOL_SIGMA = float(os.getenv("STOP_VOL_SIGMA", "2.0"))            # 2σ recent move
+STOP_VELOCITY_PCT = float(os.getenv("STOP_VELOCITY_PCT", "0.03"))     # 3% drop in 60min
 STOP_MIN_HOLD_MINUTES = int(os.getenv("STOP_MIN_HOLD_MINUTES", "5"))
 STOP_MIN_HOURS_TO_CLOSE = float(os.getenv("STOP_MIN_HOURS_TO_CLOSE", "12"))
 STOP_COOLDOWN_HOURS = float(os.getenv("STOP_COOLDOWN_HOURS", "24"))
@@ -154,35 +160,6 @@ def _fetch_price_history(token_id: str, hours: float = 6.0) -> list[dict]:
         return []
 
 
-def _fetch_trades_volume(token_id: str, since_minutes: int) -> float:
-    """Sum USD volume on token in the last N minutes.
-
-    Polymarket /trades doesn't accept a server-side timestamp filter; it returns
-    most-recent first. We pull up to 500 and filter client-side.
-    """
-    try:
-        cutoff = int((datetime.now(timezone.utc)
-                      - timedelta(minutes=since_minutes)).timestamp())
-        r = requests.get(
-            f"{DATA_API}/trades",
-            params={"market": token_id, "limit": 500},
-            timeout=15,
-        )
-        r.raise_for_status()
-        trades = r.json() or []
-        total = 0.0
-        for t in trades:
-            ts = int(t.get("timestamp") or 0)
-            if ts < cutoff:
-                # Trades are returned newest-first, so we can stop early.
-                break
-            total += float(t.get("size", 0)) * float(t.get("price", 0))
-        return total
-    except Exception as e:
-        log.debug("trades fetch failed for %s: %s", token_id[:12], e)
-        return 0.0
-
-
 def _fetch_market_meta(token_id: str) -> dict:
     """Get tick size, neg_risk, end_date, current best bid/ask for a token."""
     try:
@@ -257,23 +234,23 @@ def _evaluate_triggers(
     metrics["t2_volatility"] = t2_volatility
     metrics["sigma_threshold"] = round(STOP_VOL_SIGMA * sigma, 4) if sigma else None
 
-    # Trigger 3: volume in last 30min ≥ STOP_VOLUME_MULT × baseline.
-    vol_recent = _fetch_trades_volume(token_id, since_minutes=30)
-    vol_baseline_6h = _fetch_trades_volume(token_id, since_minutes=360)
-    # Per-30min baseline = 6h volume / 12 (rough average).
-    vol_baseline_30m = vol_baseline_6h / 12.0 if vol_baseline_6h > 0 else 0.0
-    metrics["volume_recent_30m"] = round(vol_recent, 2)
-    metrics["volume_baseline_30m"] = round(vol_baseline_30m, 2)
-    if vol_baseline_30m > 0:
-        t3_volume = vol_recent >= STOP_VOLUME_MULT * vol_baseline_30m
+    # Trigger 3: velocity — sustained drop ≥ STOP_VELOCITY_PCT over last 60min.
+    # Compares current price to the price ~60min ago.
+    if len(prices) >= 10:
+        # Find a price point ~60 min ago. fidelity=60 means 1 point/min, so
+        # take prices[-60] if available, else fall back to oldest available.
+        idx = max(0, len(prices) - 60)
+        velocity_drop = prices[idx] - prices[-1]
+        metrics["velocity_drop_60m"] = round(velocity_drop, 4)
+        t3_velocity = velocity_drop >= STOP_VELOCITY_PCT
     else:
-        # Brand-new token with no history — require absolute volume of $500
-        # in the last 30 min to count as "informed" flow.
-        t3_volume = vol_recent >= 500.0
-    metrics["t3_volume"] = t3_volume
-    metrics["volume_threshold"] = round(STOP_VOLUME_MULT * vol_baseline_30m, 2)
+        # Insufficient data — fail-safe to don't fire.
+        metrics["velocity_drop_60m"] = None
+        t3_velocity = False
+    metrics["t3_velocity"] = t3_velocity
+    metrics["velocity_threshold"] = STOP_VELOCITY_PCT
 
-    should_stop = t1_drawdown and t2_volatility and t3_volume
+    should_stop = t1_drawdown and t2_volatility and t3_velocity
     metrics["should_stop"] = should_stop
     return should_stop, metrics
 
@@ -433,8 +410,8 @@ def check_and_execute_stops(funder: str) -> int:
                 f"  • Recent move: <code>{metrics['recent_move']}</code> "
                 f"(σ={metrics['recent_sigma']}, threshold "
                 f"<code>{metrics.get('sigma_threshold')}</code>)\n"
-                f"  • Volume 30m: <code>${metrics['volume_recent_30m']:.0f}</code> "
-                f"(threshold <code>${metrics['volume_threshold']:.0f}</code>)\n\n"
+                f"  • Velocity 60m: <code>{metrics['velocity_drop_60m']}</code> "
+                f"(threshold <code>{metrics['velocity_threshold']:.3f}</code>)\n\n"
                 f"24h cooldown active on this token."
             )
             _tg_send(tg_msg)
@@ -482,10 +459,12 @@ if __name__ == "__main__":
                 continue
             ok, m = _evaluate_triggers(token_id, ep, edge, cur_price, p.get("endDate"))
             mark = "🛑 STOP" if ok else "✓ hold"
+            v60 = m.get('velocity_drop_60m')
+            v_str = f"{v60:+.3f}" if v60 is not None else "n/a"
             print(f"  {mark}  {entry.get('market','?')[:55]}  "
                   f"entry={ep:.3f} cur={cur_price:.3f}  "
-                  f"DD={m['drawdown']:.3f} σ={m['recent_sigma']} "
-                  f"vol30m=${m['volume_recent_30m']:.0f}")
+                  f"DD={m['drawdown']:+.3f} σ={m['recent_sigma']:.4f} "
+                  f"v60={v_str}")
     else:
         n = check_and_execute_stops(funder)
         print(f"Stopped out {n} position(s).")

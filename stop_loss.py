@@ -137,11 +137,11 @@ def _fetch_open_positions(funder: str) -> list[dict]:
         return []
 
 
-def _fetch_price_history(token_id: str, hours: float = 6.0) -> list[dict]:
+def _fetch_price_history(token_id: str, hours: float = 24.0) -> list[dict]:
     """Fetch price history points over the last N hours.
 
-    Uses startTs/endTs (not the `interval` param, which only controls
-    granularity). fidelity=60 = one point per minute.
+    Uses startTs/endTs. Polymarket's `fidelity=60` returns ~1 point per hour
+    (not per minute as the param name suggests). 24h → ~25 points.
     Returns list of {t, p} dicts (oldest first).
     """
     try:
@@ -215,37 +215,32 @@ def _evaluate_triggers(
     t1_drawdown = drawdown >= edge_estimated
     metrics["t1_drawdown"] = t1_drawdown
 
-    # Trigger 2: recent move is ≥ STOP_VOL_SIGMA σ.
-    history = _fetch_price_history(token_id, hours=6.0)
+    # Trigger 2: recent move is ≥ STOP_VOL_SIGMA σ of last 24h.
+    # Polymarket fidelity=60 → ~1 point/hr, so 24h yields ~25 points.
+    history = _fetch_price_history(token_id, hours=24.0)
     prices = [float(h.get("p", 0)) for h in history if h.get("p") is not None]
     sigma = pstdev(prices) if len(prices) >= 5 else 0.0
     metrics["recent_sigma"] = round(sigma, 5)
-    if sigma > 0 and prices:
-        # "Recent move" = price 60 min ago vs current.
-        # Approximate by taking the last point ~1h prior to now.
-        recent_move = prices[-1] - prices[max(0, len(prices) - 60)]
+    if sigma > 0 and len(prices) >= 3:
+        # "Recent move" = current vs ~3h ago (last 3 points at 1pt/hr).
+        recent_move = prices[-1] - prices[max(0, len(prices) - 3)]
         metrics["recent_move"] = round(recent_move, 4)
-        # Negative recent_move means price dropped.
         t2_volatility = (recent_move <= -STOP_VOL_SIGMA * sigma)
     else:
-        # Insufficient data → don't fire on volatility (fail-safe).
         metrics["recent_move"] = None
         t2_volatility = False
     metrics["t2_volatility"] = t2_volatility
     metrics["sigma_threshold"] = round(STOP_VOL_SIGMA * sigma, 4) if sigma else None
 
-    # Trigger 3: velocity — sustained drop ≥ STOP_VELOCITY_PCT over last 60min.
-    # Compares current price to the price ~60min ago.
-    if len(prices) >= 10:
-        # Find a price point ~60 min ago. fidelity=60 means 1 point/min, so
-        # take prices[-60] if available, else fall back to oldest available.
-        idx = max(0, len(prices) - 60)
+    # Trigger 3: velocity — sustained drop ≥ STOP_VELOCITY_PCT.
+    # With ~1 point/hr, look at last 3 hours of drop (sustained move).
+    if len(prices) >= 3:
+        idx = max(0, len(prices) - 3)
         velocity_drop = prices[idx] - prices[-1]
-        metrics["velocity_drop_60m"] = round(velocity_drop, 4)
+        metrics["velocity_drop_3h"] = round(velocity_drop, 4)
         t3_velocity = velocity_drop >= STOP_VELOCITY_PCT
     else:
-        # Insufficient data — fail-safe to don't fire.
-        metrics["velocity_drop_60m"] = None
+        metrics["velocity_drop_3h"] = None
         t3_velocity = False
     metrics["t3_velocity"] = t3_velocity
     metrics["velocity_threshold"] = STOP_VELOCITY_PCT
@@ -410,7 +405,7 @@ def check_and_execute_stops(funder: str) -> int:
                 f"  • Recent move: <code>{metrics['recent_move']}</code> "
                 f"(σ={metrics['recent_sigma']}, threshold "
                 f"<code>{metrics.get('sigma_threshold')}</code>)\n"
-                f"  • Velocity 60m: <code>{metrics['velocity_drop_60m']}</code> "
+                f"  • Velocity 3h: <code>{metrics['velocity_drop_3h']}</code> "
                 f"(threshold <code>{metrics['velocity_threshold']:.3f}</code>)\n\n"
                 f"24h cooldown active on this token."
             )
@@ -459,12 +454,12 @@ if __name__ == "__main__":
                 continue
             ok, m = _evaluate_triggers(token_id, ep, edge, cur_price, p.get("endDate"))
             mark = "🛑 STOP" if ok else "✓ hold"
-            v60 = m.get('velocity_drop_60m')
-            v_str = f"{v60:+.3f}" if v60 is not None else "n/a"
+            v3h = m.get('velocity_drop_3h')
+            v_str = f"{v3h:+.3f}" if v3h is not None else "n/a"
             print(f"  {mark}  {entry.get('market','?')[:55]}  "
                   f"entry={ep:.3f} cur={cur_price:.3f}  "
                   f"DD={m['drawdown']:+.3f} σ={m['recent_sigma']:.4f} "
-                  f"v60={v_str}")
+                  f"v3h={v_str}")
     else:
         n = check_and_execute_stops(funder)
         print(f"Stopped out {n} position(s).")

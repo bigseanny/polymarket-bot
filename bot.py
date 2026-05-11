@@ -110,7 +110,24 @@ def run_once() -> None:
     else:
         live_bankroll = CFG.BANKROLL_USD
 
-    sized = size_portfolio(candidates, bankroll=live_bankroll)
+    # Total NAV (cash + value of open positions) used by Rule #5 NAV cap.
+    live_nav = live_bankroll
+    if not CFG.DRY_RUN and CFG.FUNDER_ADDRESS:
+        try:
+            import requests
+            r = requests.get(
+                "https://data-api.polymarket.com/positions",
+                params={"user": CFG.FUNDER_ADDRESS.lower(), "limit": 100,
+                        "sizeThreshold": 0.01},
+                timeout=10,
+            )
+            r.raise_for_status()
+            pos_value = sum(float(p.get("currentValue") or 0) for p in (r.json() or []))
+            live_nav = live_bankroll + pos_value
+        except Exception as e:
+            logging.debug("nav fetch failed: %s", e)
+
+    sized = size_portfolio(candidates, bankroll=live_bankroll, nav=live_nav)
     logging.info(
         "Sizing → %d orders, total $%.2f of $%.2f bankroll",
         len(sized), sum(s.usd for s in sized), live_bankroll,

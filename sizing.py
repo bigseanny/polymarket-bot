@@ -44,9 +44,15 @@ def _kelly_fraction(price: float, prob_true: float) -> float:
 def size_portfolio(
     candidates: list[Candidate],
     bankroll: float | None = None,
+    nav: float | None = None,
 ) -> list[Sized]:
-    """Allocate `bankroll` across the top candidates using fractional Kelly."""
+    """Allocate `bankroll` across the top candidates using fractional Kelly.
+
+    Rule #5: caps each position at MAX_PCT_OF_NAV of total NAV (default 15%).
+    If `nav` is omitted, we treat `bankroll` as a conservative proxy.
+    """
     bankroll = bankroll if bankroll is not None else CFG.BANKROLL_USD
+    nav = nav if nav is not None else bankroll
     prob_true = 1.0 - CFG.HAIRCUT
 
     if not candidates:
@@ -68,12 +74,18 @@ def size_portfolio(
     # If sum of fractional-Kelly stakes exceeds 1.0 of bankroll, scale down.
     scale = min(1.0, 1.0 / total_f) if total_f > 0 else 0.0
 
+    # Lazy-import here to avoid scanner ↔ strategy_filters circular at module load.
+    from strategy_filters import cap_position_by_nav
+
     sized: list[Sized] = []
     for c, f in zip(pool, raw):
         usd = bankroll * f * scale
 
-        # Hard per-market cap.
+        # Hard per-market cap (legacy absolute dollar limit).
         usd = min(usd, CFG.MAX_PER_MARKET_USD)
+
+        # Rule #5: NAV-relative cap (e.g. 15% of NAV) — adapts as NAV grows.
+        usd = cap_position_by_nav(usd, nav)
 
         # Don't eat too much of the best-ask depth. ask_size is in shares.
         max_book_usd = c.best_ask_size * c.best_ask * CFG.MAX_PCT_OF_BOOK

@@ -50,6 +50,8 @@ class Candidate:
     days_to_resolution: float
     neg_risk: bool
     tick_size: float
+    event_slug: str = ""   # parent event slug (for per-event dedupe / cap)
+    category: str = ""     # inferred category (crypto, sports, etc.)
 
     def to_log(self) -> dict:
         d = asdict(self)
@@ -376,6 +378,20 @@ def scan() -> list[Candidate]:
             if edge < required_edge:
                 continue
 
+            # Strategy filters: per-category edge floor (#4) + BTC buffer (#1B).
+            from strategy_filters import passes_strategy_filters
+            ok, reason, category = passes_strategy_filters(
+                question=m.get("question", ""),
+                market_slug=m.get("slug", ""),
+                outcome=str(outcome_label),
+                edge=edge,
+                base_min_edge=required_edge,
+            )
+            if not ok:
+                log.info("Strategy filter drop: %s (%s) — %s",
+                         m.get("slug", "?"), outcome_label, reason)
+                continue
+
             # Compute gross annualized return if the bet wins.
             # Profit per $1 staked = (1-ask)/ask; extrapolate to 365 days.
             gross_per_dollar = (1.0 - ask_price) / ask_price if ask_price > 0 else 0.0
@@ -399,10 +415,25 @@ def scan() -> list[Candidate]:
                 days_to_resolution=round(days, 2),
                 neg_risk=neg_risk,
                 tick_size=tick,
+                event_slug=m.get("_event_slug", "") or "",
+                category=category,
             ))
 
     # Rank by annualized return rather than raw edge — a 4¢ edge resolving in
     # 3 days beats a 4¢ edge resolving in 14 days.
     candidates.sort(key=lambda c: c.annualized_return, reverse=True)
-    log.info("Scan complete: %d qualifying candidates", len(candidates))
+
+    # Rules #2 + #3: dedupe correlated (1 per event/scan) and enforce per-event
+    # open-position cap.
+    pre_count = len(candidates)
+    try:
+        from strategy_filters import (
+            filter_by_event_rules, fetch_existing_positions_by_event,
+        )
+        existing = fetch_existing_positions_by_event(CFG.FUNDER_ADDRESS)
+        candidates = filter_by_event_rules(candidates, existing)
+    except Exception as e:
+        log.warning("event-rules filter failed: %s", e)
+    log.info("Scan complete: %d qualifying candidates (pre-event-filter: %d)",
+             len(candidates), pre_count)
     return candidates

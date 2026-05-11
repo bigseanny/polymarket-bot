@@ -1,0 +1,26 @@
+[Unit]
+Description=Polymarket bot stats endpoint (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bot
+Group=bot
+WorkingDirectory=/home/bot/polymarket-bot
+EnvironmentFile=/home/bot/polymarket-bot/.env
+ExecStart=/home/bot/polymarket-bot/.venv/bin/python /home/bot/polymarket-bot/stats_server.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/bot/polymarket-bot/logs/stats_server.log
+StandardError=append:/home/bot/polymarket-bot/logs/stats_server.log
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/bot/polymarket-bot/logs
+
+[Install]
+WantedBy=multi-user.target

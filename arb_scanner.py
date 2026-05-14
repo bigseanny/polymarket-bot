@@ -202,7 +202,13 @@ def scan_arb_baskets(markets: list[dict]) -> list[ArbBasket]:
     skipped_too_many_legs = 0
     skipped_no_book = 0
     skipped_negative_edge = 0
+    skipped_low_volume_prefilter = 0
+    max_events_to_probe = int(os.environ.get("ARB_MAX_EVENTS_PROBED", "200"))
 
+    # Pre-filter: keep only neg-risk events with sufficient volume BEFORE we
+    # hit the orderbook API. Each book fetch is ~6s worst-case, so this is
+    # the most expensive loop in the bot — cut it down aggressively.
+    candidate_events: list[tuple[str, list[dict]]] = []
     for event_slug, mkts in grouped.items():
         if not _is_neg_risk_event(mkts):
             skipped_not_neg += 1
@@ -210,6 +216,35 @@ def scan_arb_baskets(markets: list[dict]) -> list[ArbBasket]:
         if len(mkts) > MAX_LEGS:
             skipped_too_many_legs += 1
             continue
+        total_vol = sum(float(m.get("volume24hr") or m.get("volume") or 0) for m in mkts)
+        if total_vol < MIN_EVENT_VOL_USD:
+            skipped_low_volume_prefilter += 1
+            continue
+        candidate_events.append((event_slug, mkts))
+
+    log.info(
+        "Arb pre-filter: %d events grouped → %d neg-risk + high-volume candidates "
+        "(skipped: not-neg=%d, too-many-legs=%d, low-volume=%d)",
+        len(grouped), len(candidate_events),
+        skipped_not_neg, skipped_too_many_legs, skipped_low_volume_prefilter,
+    )
+
+    # Sort by volume desc so we probe the most active baskets first
+    candidate_events.sort(
+        key=lambda kv: sum(float(m.get("volume24hr") or m.get("volume") or 0) for m in kv[1]),
+        reverse=True,
+    )
+    if len(candidate_events) > max_events_to_probe:
+        log.warning(
+            "Arb scan capped at top %d events by volume (had %d candidates)",
+            max_events_to_probe, len(candidate_events),
+        )
+        candidate_events = candidate_events[:max_events_to_probe]
+
+    for idx, (event_slug, mkts) in enumerate(candidate_events):
+        if idx > 0 and idx % 50 == 0:
+            log.info("Arb scan progress: %d/%d events probed, %d baskets found so far",
+                     idx, len(candidate_events), len(baskets))
 
         examined += 1
 
@@ -270,10 +305,8 @@ def scan_arb_baskets(markets: list[dict]) -> list[ArbBasket]:
             continue
         expected_profit = recommended_shares * profit_per_share
 
-        # Compute parent event volume + days_to_resolution
+        # Compute parent event volume + days_to_resolution (already pre-filtered above)
         total_vol = sum(float(m.get("volume24hr") or m.get("volume") or 0) for m in mkts)
-        if total_vol < MIN_EVENT_VOL_USD:
-            continue
         days = min(_days_until(m.get("endDate")) for m in mkts)
 
         # Use first market's question as event header (Polymarket events usually share parent)
@@ -300,10 +333,10 @@ def scan_arb_baskets(markets: list[dict]) -> list[ArbBasket]:
     baskets.sort(key=lambda b: b.expected_profit_usd, reverse=True)
 
     log.info(
-        "Arb scan: %d neg-risk events examined → %d baskets profitable; "
-        "skipped: not-neg=%d, too-many-legs=%d, no-book=%d, negative-edge=%d",
-        examined, len(baskets), skipped_not_neg, skipped_too_many_legs,
-        skipped_no_book, skipped_negative_edge,
+        "Arb scan complete: %d events probed → %d baskets profitable; "
+        "skipped: no-book=%d, negative-edge=%d (pre-filter dropped: not-neg=%d, too-many-legs=%d, low-volume=%d)",
+        examined, len(baskets), skipped_no_book, skipped_negative_edge,
+        skipped_not_neg, skipped_too_many_legs, skipped_low_volume_prefilter,
     )
     return baskets
 

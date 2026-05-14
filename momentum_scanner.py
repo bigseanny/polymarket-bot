@@ -236,7 +236,12 @@ def scan_momentum_candidates(
     skipped_signal = 0
     skipped_filter = 0
     skipped_cooldown = 0
+    max_markets_to_probe = int(os.environ.get("MOMENTUM_MAX_MARKETS_PROBED", "300"))
 
+    # Pre-filter: only keep markets that pass the cheap volume + days_to_resolution
+    # checks BEFORE we hit prices-history. Each history fetch is a separate HTTP
+    # call — cap the total to keep scan time bounded.
+    eligible: list[dict] = []
     for m in markets:
         days = _days_until(m.get("endDate"))
         if days < MOMENTUM_MIN_DAYS or days > MOMENTUM_MAX_DAYS:
@@ -246,6 +251,25 @@ def scan_momentum_candidates(
         if vol24 < MOMENTUM_MIN_VOLUME_USD:
             skipped_filter += 1
             continue
+        eligible.append(m)
+
+    # Sort by 24h volume desc, take top N
+    eligible.sort(key=lambda m: float(m.get("volume24hr") or m.get("volume") or 0), reverse=True)
+    log.info(
+        "Momentum pre-filter: %d markets → %d pass volume+days filter (skipped: %d)",
+        len(markets), len(eligible), skipped_filter,
+    )
+    if len(eligible) > max_markets_to_probe:
+        log.warning(
+            "Momentum scan capped at top %d markets by 24h volume (had %d eligible)",
+            max_markets_to_probe, len(eligible),
+        )
+        eligible = eligible[:max_markets_to_probe]
+
+    for idx, m in enumerate(eligible):
+        if idx > 0 and idx % 50 == 0:
+            log.info("Momentum scan progress: %d/%d markets probed, %d candidates so far",
+                     idx, len(eligible), len(candidates))
         tokens = m.get("clobTokenIds") or m.get("tokens") or []
         outcomes = m.get("outcomes") or ["Yes", "No"]
         if isinstance(tokens, str):

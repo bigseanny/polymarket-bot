@@ -24,13 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import CFG
-from scanner import scan
-from sizing import size_portfolio
-from executor import execute, cancel_stale_orders
+from executor import cancel_stale_orders
 from notify import notify
-from bankroll import effective_bankroll
 from telegram_commands import poll_telegram_commands
 from stop_loss import check_and_execute_stops
+from strategy_dispatch import run_once as _dispatch_run_once, STRATEGY_MODE
 
 
 # ── Graceful shutdown ────────────────────────────────────────────────────
@@ -81,8 +79,9 @@ def run_once() -> None:
     except Exception as e:
         logging.warning("tg poll failed: %s", e)
 
-    # Per-position stop-loss: smart trigger on each open position.
-    if not CFG.DRY_RUN and CFG.FUNDER_ADDRESS:
+    # Per-position stop-loss: smart trigger on each open NEARCERT position.
+    # Momentum has its own TP/SL/time-stop manager inside its dispatcher.
+    if STRATEGY_MODE == "nearcert" and not CFG.DRY_RUN and CFG.FUNDER_ADDRESS:
         try:
             n = check_and_execute_stops(CFG.FUNDER_ADDRESS)
             if n:
@@ -90,6 +89,15 @@ def run_once() -> None:
         except Exception as e:
             logging.warning("stop-loss check failed: %s", e)
 
+    # Delegate the actual scan + size + execute pipeline to the dispatcher,
+    # which picks the right pipeline based on STRATEGY_MODE.
+    _dispatch_run_once()
+    return  # the rest of this function is dead code in nearcert mode, kept for reference
+    # ---- Legacy nearcert inline path (now unreachable, dispatcher handles it) ----
+    from scanner import scan
+    from sizing import size_portfolio
+    from executor import execute
+    from bankroll import effective_bankroll
     candidates = scan()
     logging.info("Top qualifying candidates: %d", len(candidates))
     for c in candidates[:10]:

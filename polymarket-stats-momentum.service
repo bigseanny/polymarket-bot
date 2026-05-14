@@ -1,0 +1,28 @@
+[Unit]
+Description=Polymarket momentum bot stats endpoint (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bot
+Group=bot
+WorkingDirectory=/home/bot/polymarket-bot-momentum
+EnvironmentFile=/home/bot/polymarket-bot-momentum/.env
+Environment=STATS_PORT=8082
+Environment=STATS_SERVICE_NAME=polymarket-bot-momentum.service
+ExecStart=/home/bot/polymarket-bot-momentum/.venv/bin/python /home/bot/polymarket-bot-momentum/stats_server.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/bot/polymarket-bot-momentum/logs/stats_server.log
+StandardError=append:/home/bot/polymarket-bot-momentum/logs/stats_server.log
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/bot/polymarket-bot-momentum/logs
+
+[Install]
+WantedBy=multi-user.target

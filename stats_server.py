@@ -48,6 +48,7 @@ PROXY = os.environ.get("POLYMARKET_FUNDER_ADDRESS", "").lower()
 DATA_API = "https://data-api.polymarket.com"
 TOKEN = os.environ.get("STATS_TOKEN", "")
 SERVICE_NAME = os.environ.get("STATS_SERVICE_NAME", "polymarket-bot.service")
+STRATEGY_MODE = os.environ.get("STRATEGY_MODE", "nearcert").strip().lower()
 
 if not TOKEN or len(TOKEN) < 24:
     log.error("STATS_TOKEN env var is missing or too short (need ≥24 chars). Refusing to start.")
@@ -466,6 +467,8 @@ def stats(request: Request) -> JSONResponse:
     body = {
         "timestamp": now.isoformat(),
         "elapsed_s": round(time.time() - t0, 3),
+        "strategy_mode": STRATEGY_MODE,
+        "service_name": SERVICE_NAME,
         "service": service,
         "paused": _paused(),
         "scan": scan,
@@ -493,5 +496,5 @@ def stats(request: Request) -> JSONResponse:
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("STATS_PORT", "8080"))
-    log.info("Starting stats server on 0.0.0.0:%d (service=%s)", port, SERVICE_NAME)
+    log.info("Starting stats server on 0.0.0.0:%d (service=%s, strategy=%s)", port, SERVICE_NAME, STRATEGY_MODE)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

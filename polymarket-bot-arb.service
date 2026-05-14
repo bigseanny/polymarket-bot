@@ -1,0 +1,19 @@
+[Unit]
+Description=Polymarket arbitrage bot (STRATEGY_MODE=arb)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bot
+Group=bot
+WorkingDirectory=/home/bot/polymarket-bot-arb
+EnvironmentFile=/home/bot/polymarket-bot-arb/.env
+ExecStart=/home/bot/polymarket-bot-arb/.venv/bin/python /home/bot/polymarket-bot-arb/bot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/bot/polymarket-bot-arb/logs/bot.log
+StandardError=append:/home/bot/polymarket-bot-arb/logs/bot.log
+
+[Install]
+WantedBy=multi-user.target

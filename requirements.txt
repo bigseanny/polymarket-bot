@@ -1,5 +1,8 @@
 requests>=2.31
 python-dotenv>=1.0
+# Stats server endpoint
+fastapi>=0.110
+uvicorn[standard]>=0.27
 # V2 client — V1 stopped working at the April 28 2026 cutover.
 py-clob-client-v2>=1.0
 # Auto-redeem via Polymarket relayer (Stage 2). Optional — omit if you

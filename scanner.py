@@ -378,7 +378,7 @@ def scan() -> list[Candidate]:
             if edge < required_edge:
                 continue
 
-            # Strategy filters: per-category edge floor (#4) + BTC buffer (#1B).
+            # Strategy filters: slug blacklist (#6) + category edge floor (#4) + BTC buffer (#1B).
             from strategy_filters import passes_strategy_filters
             ok, reason, category = passes_strategy_filters(
                 question=m.get("question", ""),
@@ -386,6 +386,7 @@ def scan() -> list[Candidate]:
                 outcome=str(outcome_label),
                 edge=edge,
                 base_min_edge=required_edge,
+                event_slug=m.get("_event_slug", "") or "",
             )
             if not ok:
                 log.info("Strategy filter drop: %s (%s) — %s",

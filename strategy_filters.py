@@ -57,6 +57,27 @@ CATEGORY_MIN_EDGE = {
 
 MAX_PCT_OF_NAV = float(os.getenv("MAX_PCT_OF_NAV", "0.15"))
 
+# #6 Slug blacklist — reject candidates whose market_slug OR event_slug matches
+# any of these regex patterns. Comma-separated. Default: ban Elon tweet-count
+# markets (3 stop-losses in 2 weeks, σ too high for our stop logic).
+SLUG_BLACKLIST_PATTERNS = [
+    p.strip() for p in os.getenv(
+        "SLUG_BLACKLIST_REGEX",
+        r"elon-musk-of-tweets,elon-musk-tweets,elon-tweets-",
+    ).split(",") if p.strip()
+]
+_SLUG_BLACKLIST_COMPILED = [re.compile(p, re.IGNORECASE) for p in SLUG_BLACKLIST_PATTERNS]
+
+
+def check_slug_blacklist(market_slug: str, event_slug: str) -> tuple[bool, str]:
+    """#6 Reject candidates matching any banned slug pattern."""
+    if not _SLUG_BLACKLIST_COMPILED:
+        return True, ""
+    for pat in _SLUG_BLACKLIST_COMPILED:
+        if pat.search(market_slug or "") or pat.search(event_slug or ""):
+            return False, f"slug matched blacklist pattern /{pat.pattern}/"
+    return True, ""
+
 # ── BTC spot cache ─────────────────────────────────────────────────────
 _btc_spot_cache: dict[str, float] = {"price": 0.0, "ts": 0.0}
 _BTC_CACHE_TTL = 30  # seconds
@@ -289,10 +310,15 @@ def fetch_existing_positions_by_event(funder: str) -> dict[str, int]:
 
 # ── Composite check: run all per-candidate filters ─────────────────────
 def passes_strategy_filters(question: str, market_slug: str, outcome: str,
-                            edge: float, base_min_edge: float
+                            edge: float, base_min_edge: float,
+                            event_slug: str = "",
                             ) -> tuple[bool, str, str]:
-    """Run the per-candidate filters (#1B, #4). Returns (ok, reason, category)."""
+    """Run the per-candidate filters (#1B, #4, #6). Returns (ok, reason, category)."""
     category = infer_category(question, market_slug)
+
+    ok, reason = check_slug_blacklist(market_slug, event_slug)
+    if not ok:
+        return False, f"#6 {reason}", category
 
     ok, reason = check_btc_buffer(question, outcome, category)
     if not ok:

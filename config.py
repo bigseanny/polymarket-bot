@@ -46,7 +46,7 @@ class Config:
     MIN_BID: float = _f("MIN_BID", 0.95)             # required to prove consensus (anti long-shot filter). Raised 0.90→0.95 after 0/27 win rate at 0.90.
     MAX_SPREAD: float = _f("MAX_SPREAD", 0.05)       # widest book we'll trust
     HAIRCUT: float = _f("HAIRCUT", 0.01)             # subtract from "true" prob
-    MIN_EDGE: float = _f("MIN_EDGE", 0.04)           # require (1-haircut-ask) ≥ this
+    MIN_EDGE: float = _f("MIN_EDGE", 0.03)           # require (1-haircut-ask) ≥ this. Lowered 0.04→0.03 (May 17) to capture markets like Hormuz NO at 0.9595 where the bid/MIN_BID gate already enforces consensus.
     MIN_VOLUME_USD: float = _f("MIN_VOLUME_USD", 50_000)
     MIN_LIQUIDITY_USD: float = _f("MIN_LIQUIDITY_USD", 5_000)
     MAX_DAYS_TO_RESOLUTION: float = _f("MAX_DAYS_TO_RESOLUTION", 14)
@@ -55,7 +55,7 @@ class Config:
     # Edge must clear max(MIN_EDGE, TARGET_APR * ask * days/365).
     # Longer bets need a larger edge to earn the same annualized return.
     # Set TARGET_APR = 0 to disable scaling and use flat MIN_EDGE only.
-    TARGET_APR: float = _f("TARGET_APR", 1.0)        # 1.0 = ~100% annualized target
+    TARGET_APR: float = _f("TARGET_APR", 0.75)       # 0.75 = ~75% annualized target. Lowered 1.0→0.75 (May 17) alongside MIN_EDGE 0.04→0.03 to capture 14-day 0.96-bid markets like Hormuz NO. MIN_BID 0.95 already enforces consensus.
 
     # ── Sizing (fractional Kelly) ────────────────────────────────────────
     BANKROLL_USD: float = _f("BANKROLL_USD", 1_000)         # total capital to deploy

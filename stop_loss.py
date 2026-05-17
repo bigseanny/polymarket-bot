@@ -47,6 +47,8 @@ EXITS_LOG = LOG_DIR / "stop_exits.jsonl"
 # ── Config ─────────────────────────────────────────────────────────────
 STOP_LOSS_ENABLED = os.getenv("STOP_LOSS_ENABLED", "true").lower() in ("1", "true", "yes")
 STOP_VOL_SIGMA = float(os.getenv("STOP_VOL_SIGMA", "2.0"))            # 2σ recent move
+STOP_HARD_DRAWDOWN_PCT = float(os.getenv("STOP_HARD_DRAWDOWN_PCT", "0.10"))  # OR: drawdown ≥ 10% → exit unconditionally
+STOP_VOL_SIGMA_CAP = float(os.getenv("STOP_VOL_SIGMA_CAP", "0.04"))    # cap σ so T2 fires no later than ~8% move
 STOP_VELOCITY_PCT = float(os.getenv("STOP_VELOCITY_PCT", "0.03"))     # 3% drop in 60min
 STOP_MIN_HOLD_MINUTES = int(os.getenv("STOP_MIN_HOLD_MINUTES", "5"))
 STOP_MIN_HOURS_TO_CLOSE = float(os.getenv("STOP_MIN_HOURS_TO_CLOSE", "12"))
@@ -217,10 +219,14 @@ def _evaluate_triggers(
 
     # Trigger 2: recent move is ≥ STOP_VOL_SIGMA σ of last 24h.
     # Polymarket fidelity=60 → ~1 point/hr, so 24h yields ~25 points.
+    # σ is CAPPED at STOP_VOL_SIGMA_CAP to prevent high-volatility markets from
+    # making T2 unreachable until catastrophic moves (the $40 Elon tweet bug).
     history = _fetch_price_history(token_id, hours=24.0)
     prices = [float(h.get("p", 0)) for h in history if h.get("p") is not None]
-    sigma = pstdev(prices) if len(prices) >= 5 else 0.0
-    metrics["recent_sigma"] = round(sigma, 5)
+    raw_sigma = pstdev(prices) if len(prices) >= 5 else 0.0
+    sigma = min(raw_sigma, STOP_VOL_SIGMA_CAP)
+    metrics["recent_sigma"] = round(raw_sigma, 5)
+    metrics["effective_sigma"] = round(sigma, 5)
     if sigma > 0 and len(prices) >= 3:
         # "Recent move" = current vs ~3h ago (last 3 points at 1pt/hr).
         recent_move = prices[-1] - prices[max(0, len(prices) - 3)]
@@ -245,7 +251,18 @@ def _evaluate_triggers(
     metrics["t3_velocity"] = t3_velocity
     metrics["velocity_threshold"] = STOP_VELOCITY_PCT
 
-    should_stop = t1_drawdown and t2_volatility and t3_velocity
+    # Hard backstop: drawdown ≥ STOP_HARD_DRAWDOWN_PCT → exit unconditionally.
+    # Catches slow bleeds that don't trigger T1+T2+T3 simultaneously (the
+    # Finland Eurovision -21.5% bug — price drifted slowly past every threshold
+    # before all three triggers happened to fire on the same 3h window).
+    t4_hard = drawdown >= STOP_HARD_DRAWDOWN_PCT * entry_price
+    metrics["t4_hard_drawdown"] = t4_hard
+    metrics["t4_hard_threshold"] = round(STOP_HARD_DRAWDOWN_PCT * entry_price, 4)
+
+    # Fire on (T1 AND T2 AND T3) OR (T4 hard backstop).
+    composite_stop = t1_drawdown and t2_volatility and t3_velocity
+    should_stop = composite_stop or t4_hard
+    metrics["composite_stop"] = composite_stop
     metrics["should_stop"] = should_stop
     return should_stop, metrics
 

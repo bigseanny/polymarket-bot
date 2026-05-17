@@ -42,8 +42,8 @@ class Config:
     SIGNATURE_TYPE: int = _i("POLYMARKET_SIGNATURE_TYPE", 1)
 
     # ── Strategy thresholds ──────────────────────────────────────────────
-    MAX_ASK: float = _f("MAX_ASK", 0.95)            # only buy if best ask ≤ this
-    MIN_BID: float = _f("MIN_BID", 0.90)             # required to prove consensus (anti long-shot filter)
+    MAX_ASK: float = _f("MAX_ASK", 0.97)            # only buy if best ask ≤ this. Raised 0.95→0.97 so MIN_BID 0.95 still leaves an entry window.
+    MIN_BID: float = _f("MIN_BID", 0.95)             # required to prove consensus (anti long-shot filter). Raised 0.90→0.95 after 0/27 win rate at 0.90.
     MAX_SPREAD: float = _f("MAX_SPREAD", 0.05)       # widest book we'll trust
     HAIRCUT: float = _f("HAIRCUT", 0.01)             # subtract from "true" prob
     MIN_EDGE: float = _f("MIN_EDGE", 0.04)           # require (1-haircut-ask) ≥ this
